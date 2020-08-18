@@ -180,6 +180,7 @@ fail:
 static int uv__process_init_stdio(uv_stdio_container_t* container, int fds[2]) {
   int mask;
   int fd;
+  int err;
 
   mask = UV_IGNORE | UV_CREATE_PIPE | UV_INHERIT_FD | UV_INHERIT_STREAM;
 
@@ -191,6 +192,19 @@ static int uv__process_init_stdio(uv_stdio_container_t* container, int fds[2]) {
     assert(container->data.stream != NULL);
     if (container->data.stream->type != UV_NAMED_PIPE)
       return UV_EINVAL;
+#ifdef __CYGWIN__
+    else if ((container->flags & UV_WRITABLE_PIPE) && !(container->flags & UV_READABLE_PIPE))
+      return uv__make_pipe(fds, 0);
+    else if ((container->flags & UV_READABLE_PIPE) && !(container->flags & UV_WRITABLE_PIPE)) {
+      err = uv__make_pipe(fds, 0);
+      if (err)
+        return err;
+      fd = fds[0];
+      fds[0] = fds[1];
+      fds[1] = fd;
+      return 0;
+    }
+#endif
     else
       return uv__make_socketpair(fds);
 
@@ -222,7 +236,7 @@ static int uv__process_open_stream(uv_stdio_container_t* container,
   if (!(container->flags & UV_CREATE_PIPE) || pipefds[0] < 0)
     return 0;
 
-  err = uv__close(pipefds[1]);
+  err = uv__close_nocheckstdio(pipefds[1]);
   if (err != 0)
     abort();
 
